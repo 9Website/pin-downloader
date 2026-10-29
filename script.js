@@ -11,39 +11,38 @@ async function startDownload() {
     }
 
     downloadBtn.disabled = true;
-    statusDiv.textContent = 'Fetching board data...';
+    statusDiv.textContent = 'Connecting to Pinterest...';
     progressContainer.style.display = 'block';
     progressBar.style.width = '10%';
 
     try {
-        // Using corsproxy.io which returns raw HTML directly, avoiding JSON parsing errors
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(urlInput)}`;
-        const response = await fetch(proxyUrl);
+        // Clean up the URL format
+        let cleanUrl = urlInput.replace(/\/$/, "");
         
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
-        }
+        // Use api.allorigins.win with raw JSON parsing capabilities
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(cleanUrl + '/')}`;
+        
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error('Network response was not ok.');
+        
+        const data = await response.json();
+        if (!data.contents) throw new Error('Could not retrieve board content.');
 
-        const htmlText = await response.text();
-
-        statusDiv.textContent = 'Parsing pins...';
+        statusDiv.textContent = 'Extracting media links...';
         progressBar.style.width = '30%';
 
         const parser = new DOMParser();
-        const doc = parser.parseFromString(htmlText, 'text/html');
+        const doc = parser.parseFromString(data.contents, 'text/html');
         
         let mediaUrls = new Set();
 
-        // Scrape all image tags and upgrade thumbnails to original high-res versions
+        // Look for Pinterest image containers and JSON script payloads embedded in the page
         doc.querySelectorAll('img').forEach(img => {
             let src = img.src;
             if (src) {
-                if (src.includes('236x')) {
-                    src = src.replace('236x', 'originals');
-                } else if (src.includes('474x')) {
-                    src = src.replace('474x', 'originals');
-                } else if (src.includes('736x')) {
-                    src = src.replace('736x', 'originals');
+                // Upgrade to high resolution original images
+                if (src.includes('236x') || src.includes('474x') || src.includes('736x')) {
+                    src = src.replace(/236x|474x|736x/, 'originals');
                 }
                 if (src.startsWith('http')) {
                     mediaUrls.add(src);
@@ -51,10 +50,20 @@ async function startDownload() {
             }
         });
 
+        // Also search script tags containing initial data json
+        doc.querySelectorAll('script').forEach(script => {
+            if (script.textContent && script.textContent.includes('"images":')) {
+                const matches = script.textContent.match(/https?:\/\/[^"\s]+\.(jpg|jpeg|png|mp4)/g);
+                if (matches) {
+                    matches.forEach(m => mediaUrls.add(m));
+                }
+            }
+        });
+
         const urlsArray = Array.from(mediaUrls);
 
         if (urlsArray.length === 0) {
-            throw new Error('No pins found. Make sure the board is public and the URL is correct.');
+            throw new Error('No pins found. Ensure the board is public and format is pinterest.com/username/board.');
         }
 
         statusDiv.textContent = `Found ${urlsArray.length} items. Downloading files...`;
@@ -68,15 +77,15 @@ async function startDownload() {
         for (let i = 0; i < urlsArray.length; i++) {
             const fileUrl = urlsArray[i];
             try {
-                // Route image downloads through the proxy too to bypass CORS
-                const fileResponse = await fetch(`https://corsproxy.io/?${encodeURIComponent(fileUrl)}`);
+                // Fetch binary file content via allorigins raw mode
+                const fileResponse = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(fileUrl)}`);
                 if (fileResponse.ok) {
                     const blob = await fileResponse.blob();
-                    const filename = `pin_${i + 1}.${blob.type.includes('video') ? 'mp4' : 'jpg'}`;
-                    folder.file(filename, blob);
+                    const ext = blob.type.includes('video') ? 'mp4' : 'jpg';
+                    folder.file(`pin_${i + 1}.${ext}`, blob);
                 }
             } catch (err) {
-                console.warn(`Skipped a file due to error:`, err);
+                console.warn(`Skipped item ${i + 1} due to network restriction.`);
             }
             
             completed++;
@@ -102,7 +111,7 @@ async function startDownload() {
         progressBar.style.width = '100%';
     } catch (error) {
         console.error(error);
-        statusDiv.textContent = `Error: ${error.message}`;
+        statusDiv.textContent = `Error: ${error.message}. Try a smaller or different public board.`;
     } finally {
         downloadBtn.disabled = false;
     }
