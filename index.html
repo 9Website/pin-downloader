@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pinterest Board Downloader</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Include JSZip for creating zip files in the browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>📌 Pinterest Board Downloader</h1>
+        <p>Paste a public Pinterest board URL below to download all pins into a ZIP folder.</p>
+        
+        <div class="input-group">
+            <input type="text" id="boardUrl" placeholder="https://www.pinterest.com/username/board-name/" />
+            <button id="downloadBtn" onclick="startDownload()">Download ZIP</button>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div class="progress-bar-container" id="progressContainer" style="display: none;">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
