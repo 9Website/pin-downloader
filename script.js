@@ -16,44 +16,45 @@ async function startDownload() {
     progressBar.style.width = '10%';
 
     try {
-        // Use a public CORS proxy to fetch the Pinterest board HTML page
-        // Note: For heavy production use, consider deploying a dedicated worker proxy.
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(urlInput)}`;
+        // Using corsproxy.io which returns raw HTML directly, avoiding JSON parsing errors
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(urlInput)}`;
         const response = await fetch(proxyUrl);
-        const data = await response.json();
-
-        if (!data.contents) {
-            throw new Error('Failed to fetch the board page. Check the URL.');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
         }
+
+        const htmlText = await response.text();
 
         statusDiv.textContent = 'Parsing pins...';
         progressBar.style.width = '30%';
 
-        // Extract image/video source URLs from Pinterest's embedded JSON data or standard img tags
         const parser = new DOMParser();
-        const doc = parser.parseFromString(data.contents, 'text/html');
+        const doc = parser.parseFromString(htmlText, 'text/html');
         
         let mediaUrls = new Set();
 
-        // Pinterest typically stores high-res images in specific srcset or script tags, 
-        // but we can scrape <img> tags and meta tags as a robust baseline:
+        // Scrape all image tags and upgrade thumbnails to original high-res versions
         doc.querySelectorAll('img').forEach(img => {
             let src = img.src;
-            // Upgrade thumbnail URLs to original high-res images if possible
-            if (src && src.includes('236x')) {
-                src = src.replace('236x', 'originals');
-            } else if (src && src.includes('474x')) {
-                src = src.replace('474x', 'originals');
-            }
-            if (src && src.startsWith('http')) {
-                mediaUrls.add(src);
+            if (src) {
+                if (src.includes('236x')) {
+                    src = src.replace('236x', 'originals');
+                } else if (src.includes('474x')) {
+                    src = src.replace('474x', 'originals');
+                } else if (src.includes('736x')) {
+                    src = src.replace('736x', 'originals');
+                }
+                if (src.startsWith('http')) {
+                    mediaUrls.add(src);
+                }
             }
         });
 
         const urlsArray = Array.from(mediaUrls);
 
         if (urlsArray.length === 0) {
-            throw new Error('No downloadable pins found on this board. Ensure it is public.');
+            throw new Error('No pins found. Make sure the board is public and the URL is correct.');
         }
 
         statusDiv.textContent = `Found ${urlsArray.length} items. Downloading files...`;
@@ -64,14 +65,16 @@ async function startDownload() {
         
         let completed = 0;
         
-        // Download files in parallel batches to build the zip
         for (let i = 0; i < urlsArray.length; i++) {
             const fileUrl = urlsArray[i];
             try {
-                const fileResponse = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(fileUrl)}`);
-                const blob = await fileResponse.blob();
-                const filename = `pin_${i + 1}.${blob.type.includes('video') ? 'mp4' : 'jpg'}`;
-                folder.file(filename, blob);
+                // Route image downloads through the proxy too to bypass CORS
+                const fileResponse = await fetch(`https://corsproxy.io/?${encodeURIComponent(fileUrl)}`);
+                if (fileResponse.ok) {
+                    const blob = await fileResponse.blob();
+                    const filename = `pin_${i + 1}.${blob.type.includes('video') ? 'mp4' : 'jpg'}`;
+                    folder.file(filename, blob);
+                }
             } catch (err) {
                 console.warn(`Skipped a file due to error:`, err);
             }
@@ -87,7 +90,6 @@ async function startDownload() {
 
         const content = await zip.generateAsync({ type: 'blob' });
         
-        // Trigger download
         const downloadUrl = URL.createObjectURL(content);
         const a = document.createElement('a');
         a.href = downloadUrl;
